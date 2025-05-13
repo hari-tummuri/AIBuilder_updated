@@ -1,0 +1,8 @@
+django
+djangorestframework
+mysqlclient
+requests
+uvicorn
+uvicorn-worker
+azure-storage-blob
+python-dotenv
