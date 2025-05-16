@@ -25,4 +25,8 @@ urlpatterns = [
     path("notify/<str:email>/", views.list_noti_by_email),
     #to download shared file to local and delete it from azure and delete the db entry for shared blob(notification table)
     path('download/', views.download_blob_to_local),
+    #to list all models
+    path('list_models/', views.list_models),
+    #to download a model
+    path('download_model/', views.pull_model_stream_view),
 ]

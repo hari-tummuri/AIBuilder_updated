@@ -9,13 +9,16 @@ from rest_framework.decorators import api_view
 from rest_framework import status
 from itassist.services import conversation
 from .utils.sync_utils import sync_json_to_mysql
-from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER
+from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE
 from django.http import FileResponse
 from .services.azure_blob_service import upload_file_to_blob, delete_blob_from_url
 from .serializers import SharedBlobSerializer
 from .models import SharedBlob
 from .services.sync_runner import check_internet_connection
-
+from .services.ollama_service import stream_ollama_pull_output
+from django.http import StreamingHttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.encoding import smart_str
 
 # Create your views here.
 
@@ -239,3 +242,43 @@ def download_blob_to_local(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['GET'])
+def list_models(request):
+    # Get the list of models from the JSON file
+    try:
+        with open(MODELS_FILE, 'r') as f:
+            data = json.load(f)
+        return Response(data, status=status.HTTP_200_OK)
+    except FileNotFoundError:
+        return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
+        # print("File not found")
+    except json.JSONDecodeError:
+        return Response({'error': 'Invalid JSON format'}, status=status.HTTP_400_BAD_REQUEST)
+        # print("Invalid JSON format")
+
+# @api_view(['POST'])
+# def pull_model(request):
+#     # Get the model name from the request
+#     model_name = request.data.get('model_name')
+#     if not model_name:
+#         return Response({'error': 'Model name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     # Pull the model using the subprocess function
+#     try:
+#         result = pull_ollama_model(model_name)
+#         return Response(result, status=status.HTTP_200_OK)
+#     except Exception as e:
+#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# @csrf_exempt
+# @api_view(['POST'])
+# def pull_model_stream_view(request):
+#     model_name = request.data.get('model_name')
+#     if not model_name:
+#         return StreamingHttpResponse(["Missing 'model' parameter"], status=400)
+
+#     return StreamingHttpResponse(
+#         (smart_str(line) for line in stream_ollama_pull_output(model_name)),
+#         content_type='text/plain'
+#     )
