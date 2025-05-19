@@ -5,7 +5,8 @@ import socket
 import requests
 from datetime import datetime
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser
 from rest_framework import status
 from itassist.services import conversation
 from .utils.sync_utils import sync_json_to_mysql
@@ -16,6 +17,7 @@ from .serializers import SharedBlobSerializer
 from .models import SharedBlob
 from .services.sync_runner import check_internet_connection
 from .services.ollama_service import stream_ollama_pull_output
+from .services.vectordb_service import simulate_vdb_upload
 from django.http import StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.encoding import smart_str
@@ -148,6 +150,7 @@ def download_file(request):
 # If the internet connection is not available, it returns a 503 error.
 @api_view(['POST'])
 def share_document(request):
+    print("Sharing document...")
     if check_internet_connection():
         sender_email = request.data.get('sender_email')
         receiver_email = request.data.get('receiver_email')
@@ -282,3 +285,38 @@ def list_models(request):
 #         (smart_str(line) for line in stream_ollama_pull_output(model_name)),
 #         content_type='text/plain'
 #     )
+
+
+
+# Simulate VDB upload
+# This function simulates the upload of a file to a VDB (vector Database).
+@api_view(["POST"])
+@parser_classes([MultiPartParser])
+def upload_document(request):
+    file = request.FILES.get("file")
+
+    if not file:
+        return Response({"error": "No file uploaded."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # === Simulate VDB upload ===
+    try:
+        # TODO: Replace this block with real VDB integration
+        simulate_vdb_upload(file)
+    except Exception as e:
+        return Response({"error": f"Failed to upload to VDB: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # === Save file locally ===
+    try:
+        # Target "others" folder inside documents root
+        target_dir = os.path.join(DOCUMENT_ROOT, "others")
+        os.makedirs(target_dir, exist_ok=True)
+        file_path = os.path.join(target_dir, file.name)
+
+        with open(file_path, "wb+") as destination:
+            for chunk in file.chunks():
+                destination.write(chunk)
+
+        return Response({"message": "Uploaded successfully."}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({"error": f"Failed to save file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

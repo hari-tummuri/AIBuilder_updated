@@ -28,5 +28,7 @@ urlpatterns = [
     #to list all models
     path('list_models/', views.list_models),
     #to download a model
-    path('download_model/', views.pull_model_stream_view),
+    # path('download_model/', views.pull_model_stream_view),
+    #to upload a file to Vector DB and store it in others folder
+    path("upload_document/", views.upload_document),
 ]
