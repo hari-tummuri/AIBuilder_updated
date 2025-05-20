@@ -149,6 +149,9 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CONV_JSON_FILE = r"./userdata/conversations.json"
+USER_DATA_ROOT = r"./userdata/"
+DEFAULT_FILE = r"./userdata/default_hyper_params.json"
+SELECTED_FILE = r"./userdata/selected_hyper_params.json"
 MODELS_FILE = r"./userdata/models.json"
 DOCUMENT_ROOT = r"./userdata/Documents"
 AZURE_CONNECTION_STRING = os.getenv('AZURE_CONNECTION_STRING')

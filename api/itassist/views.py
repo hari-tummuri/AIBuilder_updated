@@ -1,7 +1,10 @@
 from django.shortcuts import render
 import json
 import os
+import uuid
 import socket
+import threading
+import time
 import requests
 from datetime import datetime
 from rest_framework.response import Response
@@ -10,17 +13,20 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework import status
 from itassist.services import conversation
 from .utils.sync_utils import sync_json_to_mysql
-from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE
+from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE, USER_DATA_ROOT, DEFAULT_FILE, SELECTED_FILE
 from django.http import FileResponse
 from .services.azure_blob_service import upload_file_to_blob, delete_blob_from_url
 from .serializers import SharedBlobSerializer
 from .models import SharedBlob
 from .services.sync_runner import check_internet_connection
-from .services.ollama_service import stream_ollama_pull_output
+from .services.ollama_service import get_downloaded_models, delete_model
 from .services.vectordb_service import simulate_vdb_upload
-from django.http import StreamingHttpResponse
+from .services.hyper_params_service import get_hyperparameters, compare_structure
+from django.http import StreamingHttpResponse,JsonResponse,HttpResponse,HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.encoding import smart_str
+import asyncio
+import httpx
 
 # Create your views here.
 
@@ -246,47 +252,205 @@ def download_blob_to_local(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+
 @api_view(['GET'])
-def list_models(request):
-    # Get the list of models from the JSON file
+def list_downloaded_ollama_models(request):
     try:
-        with open(MODELS_FILE, 'r') as f:
-            data = json.load(f)
-        return Response(data, status=status.HTTP_200_OK)
+        models_data = get_downloaded_models()
+        return Response(models_data, status=status.HTTP_200_OK)
+
+    except requests.exceptions.ConnectionError:
+        return Response(
+            {"error": "Ollama API is not running on http://localhost:11434"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+    except requests.exceptions.RequestException as e:
+        return Response(
+            {"error": "Failed to fetch models from Ollama", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        return Response(
+            {"error": "Unexpected error", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+
+@api_view(['POST'])  # Use POST since some clients have issues with DELETE + body
+def delete_ollama_model(request):
+    model_name = request.data.get('model')
+
+    if not model_name:
+        return Response({"error": "Model name is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        result = delete_model(model_name)
+        return Response(result, status=status.HTTP_200_OK)
+
+    except requests.exceptions.ConnectionError:
+        return Response({"error": "Ollama API is not running"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    except requests.exceptions.HTTPError as e:
+        return Response({"error": f"Failed to delete model: {e.response.text}"}, status=e.response.status_code)
+
+    except Exception as e:
+        return Response({"error": "Unexpected error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+cancel_flags = {}
+cancel_lock = asyncio.Lock()
+
+
+@csrf_exempt
+async def download_ollama_model(request: HttpRequest):
+    # Parse JSON body
+    try:
+        # body_bytes = await request.body
+        body_bytes = request.body 
+        body_unicode = body_bytes.decode('utf-8')
+        data = json.loads(body_bytes.decode('utf-8'))
+        model_name = data.get('model')
+    except Exception:
+        return StreamingHttpResponse((line async for line in error_stream("Invalid JSON")), status=400)
+
+    if not model_name:
+        return StreamingHttpResponse((line async for line in error_stream("Model name is required")), status=400)
+
+    download_id = str(uuid.uuid4())
+
+    async with cancel_lock:
+        cancel_flags[download_id] = False
+
+    async def stream():
+        latest_data = None
+        last_sent_time = 0
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream("POST", "http://localhost:11434/api/pull", json={"name": model_name}) as res:
+                    async for line in res.aiter_lines():
+                        async with cancel_lock:
+                            if cancel_flags.get(download_id):
+                                yield json.dumps({"status": "cancelled"}) + '\n'
+                                break
+
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                if 'total' in data and 'completed' in data and data['total']:
+                                    percent = (data['completed'] / data['total']) * 100
+                                    data['percent'] = f"{percent:.2f}%"
+                                latest_data = json.dumps(data) + '\n'
+                            except json.JSONDecodeError:
+                                latest_data = line + '\n'
+
+                        now = asyncio.get_event_loop().time()
+                        if latest_data and (now - last_sent_time >= 1):
+                            yield latest_data
+                            last_sent_time = now
+                            latest_data = None
+                        await asyncio.sleep(0)
+
+                    if latest_data:
+                        yield latest_data
+        finally:
+            async with cancel_lock:
+                cancel_flags.pop(download_id, None)
+
+    headers = {"X-Download-ID": download_id}
+    response = StreamingHttpResponse(stream(), content_type="application/json")
+    response['X-Download-ID'] = download_id
+    # return StreamingHttpResponse(stream(), media_type="application/json", headers=headers)
+    return response
+
+
+# Optional: a helper async generator to send error messages
+async def error_stream(message):
+    yield json.dumps({"error": message}) + "\n"
+
+
+@csrf_exempt
+async def cancel_download(request):
+    try:
+        body_bytes = request.body
+        data = json.loads(body_bytes.decode('utf-8'))
+        download_id = data.get("download_id")
+
+        if not download_id:
+            return JsonResponse({"error": "Missing download_id"}, status=400)
+
+        async with cancel_lock:
+            if download_id in cancel_flags:
+                cancel_flags[download_id] = True
+                return JsonResponse({"status": "cancelled", "download_id": download_id})
+            else:
+                return JsonResponse({"error": "Download ID not found or already completed"}, status=404)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+# retrieves hyperparameters from a JSON file
+# This function reads the hyperparameters from a JSON file and returns them in the response.
+# If the file is not found, it returns a 404 error.
+@api_view(['GET'])
+def get_hyperparams_view(request):
+    try:
+        hyperparams = get_hyperparameters()
+        return Response(hyperparams, status=status.HTTP_200_OK)
     except FileNotFoundError:
-        return Response({'error': 'File not found'}, status=status.HTTP_404_NOT_FOUND)
-        # print("File not found")
+        return Response({"error": "No hyperparameter file found."}, status=status.HTTP_404_NOT_FOUND)
     except json.JSONDecodeError:
-        return Response({'error': 'Invalid JSON format'}, status=status.HTTP_400_BAD_REQUEST)
-        # print("Invalid JSON format")
-
-# @api_view(['POST'])
-# def pull_model(request):
-#     # Get the model name from the request
-#     model_name = request.data.get('model_name')
-#     if not model_name:
-#         return Response({'error': 'Model name is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-#     # Pull the model using the subprocess function
-#     try:
-#         result = pull_ollama_model(model_name)
-#         return Response(result, status=status.HTTP_200_OK)
-#     except Exception as e:
-#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-# @csrf_exempt
-# @api_view(['POST'])
-# def pull_model_stream_view(request):
-#     model_name = request.data.get('model_name')
-#     if not model_name:
-#         return StreamingHttpResponse(["Missing 'model' parameter"], status=400)
-
-#     return StreamingHttpResponse(
-#         (smart_str(line) for line in stream_ollama_pull_output(model_name)),
-#         content_type='text/plain'
-#     )
+        return Response({"error": "Invalid JSON in hyperparameter file."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        return Response({"error": "Unexpected error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# This function saves the selected hyperparameters to a JSON file.
+# It first validates the input data against a template structure.
+# If the structure is valid, it saves the data to the file.
+# If the structure is invalid, it returns a 400 error.
+@api_view(['POST'])
+def save_selected_hyper_params(request):
+    # DEFAULT_FILE = os.path.join(USER_DATA_ROOT, 'default_hyper_params.json')
+    try:
+        input_data = request.data
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Load template structure
+    try:
+        with open(DEFAULT_FILE, 'r') as f:
+            template = json.load(f)
+    except Exception as e:
+        return JsonResponse({"error": f"Failed to load template file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Validate structure
+    if not compare_structure(template, input_data):
+        return JsonResponse({"error": "Input JSON structure does not match the default template exactly."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    # Save to selected_hyper_params.json
+    try:
+        with open(SELECTED_FILE, 'w') as f:
+            json.dump(input_data, f, indent=4)
+    except Exception as e:
+        return JsonResponse({"error": f"Failed to save selected hyperparameters: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return JsonResponse({"message": "Selected hyperparameters saved successfully."}, status=status.HTTP_200_OK)
+
+# This function restores the default hyperparameters by deleting the user-specific file.
+# If the file does not exist, it returns a message indicating that the default hyperparameters are already in use.
+# If the file is deleted successfully, it returns a success message.
+@api_view(['DELETE'])
+def restore_default_hyper_params(request):
+    if os.path.exists(SELECTED_FILE):
+        try:
+            os.remove(SELECTED_FILE)
+            return JsonResponse({"message": "Restored to default hyperparameters."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return JsonResponse({"error": f"Failed to delete file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return JsonResponse({"message": "No customized hyperparameters found, already using defaults."}, status=status.HTTP_200_OK)
 
 # Simulate VDB upload
 # This function simulates the upload of a file to a VDB (vector Database).
@@ -320,3 +484,152 @@ def upload_document(request):
 
     except Exception as e:
         return Response({"error": f"Failed to save file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+#previous code
+
+
+# cancel_flags = {}
+# cancel_lock = threading.Lock()
+
+# @api_view(['POST'])
+# def download_ollama_model(request):
+#     model_name = request.data.get('model')
+#     if not model_name:
+#         return HttpResponse("Model name required", status=400)
+
+#     download_id = str(uuid.uuid4())
+
+#     with cancel_lock:
+#         cancel_flags[download_id] = False
+
+#     try:
+#         ollama_response = requests.post(
+#             'http://localhost:11434/api/pull',
+#             json={'name': model_name},
+#             stream=True
+#         )
+
+#         def event_stream():
+#             latest_data = None
+#             last_sent = 0
+
+#             for line in ollama_response.iter_lines():
+#                 with cancel_lock:
+#                     if cancel_flags.get(download_id):
+#                         yield f"data: {json.dumps({'status': 'cancelled'})}\n\n"
+#                         break
+
+#                 if line:
+#                     try:
+#                         data = json.loads(line.decode('utf-8'))
+#                         if 'total' in data and 'completed' in data:
+#                             percent = (data['completed'] / data['total']) * 100
+#                             data['percent'] = f"{percent:.2f}%"
+#                         latest_data = json.dumps(data)
+#                     except Exception:
+#                         latest_data = line.decode('utf-8')
+
+#                 now = time.time()
+#                 if latest_data and (now - last_sent >= 1):
+#                     yield f"data: {latest_data}\n\n"
+#                     last_sent = now
+#                     latest_data = None
+
+#             if latest_data:
+#                 yield f"data: {latest_data}\n\n"
+
+#             with cancel_lock:
+#                 cancel_flags.pop(download_id, None)
+
+#         response = HttpResponse(event_stream(), content_type='text/event-stream')
+#         response['X-Download-ID'] = download_id
+#         response['Cache-Control'] = 'no-cache'
+#         response['X-Accel-Buffering'] = 'no'   # For nginx proxy
+#         response['Content-Encoding'] = 'none' # Disable compression to prevent buffering
+#         return response
+
+#     except requests.exceptions.ConnectionError:
+#         return HttpResponse("Ollama is not running", status=500)
+
+#below id working with gunicorn
+
+# @api_view(['POST'])
+# def download_ollama_model(request):
+#     model_name = request.data.get('model')
+
+#     if not model_name:
+#         # return StreamingHttpResponse("Model name is required.\n", status=400)
+#         return JsonResponse({"error": "Model name is required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+#     # Generate unique ID for this download
+#     download_id = str(uuid.uuid4())
+
+#     # Create cancel flag
+#     with cancel_lock:
+#         cancel_flags[download_id] = False
+
+#     try:
+#         ollama_response = requests.post(
+#             'http://localhost:11434/api/pull',
+#             json={'name': model_name},
+#             stream=True
+#         )
+
+#         def stream_generator():
+#             latest_data = None
+#             last_sent_time = 0
+#             for line in ollama_response.iter_lines():
+#                 # Check if cancellation was requested
+#                 with cancel_lock:
+#                     if cancel_flags.get(download_id):
+#                         yield json.dumps({"status": "cancelled"}) + '\n'
+#                         break
+
+#                 if line:
+#                     try:
+#                         data = json.loads(line.decode('utf-8'))
+#                         # Calculate percent if possible
+#                         if 'total' in data and 'completed' in data and data['total']:
+#                             percent = (data['completed'] / data['total']) * 100
+#                             data['percent'] = f"{percent:.2f}%"
+#                         latest_data = json.dumps(data) + '\n'
+#                     except json.JSONDecodeError:
+#                         latest_data = line.decode('utf-8') + '\n'
+
+#                 # Check if 1 second elapsed since last send
+#                 now = time.time()
+#                 if latest_data and (now - last_sent_time >= 1):
+#                     yield latest_data
+#                     last_sent_time = now
+#                     latest_data = None
+
+#             # After stream ends, send last buffered data if any
+#             if latest_data:
+#                 yield latest_data
+
+#             # Cleanup after stream ends
+#             with cancel_lock:
+#                 cancel_flags.pop(download_id, None)
+
+#         # Return download ID in headers
+#         response = StreamingHttpResponse(stream_generator(), content_type='application/json')
+#         response['X-Download-ID'] = download_id
+#         return response
+
+#     except requests.exceptions.ConnectionError:
+#         # return StreamingHttpResponse("Ollama is not running on localhost:11434\n", status=500)
+#         return JsonResponse({"error": "Ollama is not running"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+# @api_view(['POST'])
+# def cancel_download(request):
+#     download_id = request.data.get('download_id')
+#     if not download_id:
+#         return Response({'error': 'Missing download_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     with cancel_lock:
+#         if download_id in cancel_flags:
+#             cancel_flags[download_id] = True
+#             return Response({'status': 'cancellation requested'})
+#         else:
+#             return Response({'error': 'Invalid or expired download_id'}, status=status.HTTP_400_BAD_REQUEST)

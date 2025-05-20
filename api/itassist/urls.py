@@ -26,9 +26,32 @@ urlpatterns = [
     #to download shared file to local and delete it from azure and delete the db entry for shared blob(notification table)
     path('download/', views.download_blob_to_local),
     #to list all models
-    path('list_models/', views.list_models),
+    path('list_models/', views.list_downloaded_ollama_models),
     #to download a model
-    # path('download_model/', views.pull_model_stream_view),
+    path('api/download_model/', views.download_ollama_model),
+
+    #to cancel the model download
+    path('api/cancel_download/', views.cancel_download),
+
+    #to delete a model
+    path('api/delete_model/', views.delete_ollama_model),
+    
     #to upload a file to Vector DB and store it in others folder
     path("upload_document/", views.upload_document),
+
+    #to retrive the hyperparameters
+    path('hyperparameters/', views.get_hyperparams_view),
+
+    #to save the hyperparameters
+    path('save_hyperparameters/', views.save_selected_hyper_params),
+
+    #to restore the default hyperparameters
+    path('restore_default_params/', views.restore_default_hyper_params),
 ]
+    
+
+
+
+    #testing
+    
+    
