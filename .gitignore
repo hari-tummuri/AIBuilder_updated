@@ -7,3 +7,5 @@ ngrok*
 test_api*
 
 .env
+
+conversations.json
