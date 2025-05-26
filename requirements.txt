@@ -13,3 +13,9 @@ python-dotenv
 starlette
 httpx
 psutil
+
+
+GPUtil
+setuptools
+py-cpuinfo
+nvidia-ml-py3

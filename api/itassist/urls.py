@@ -47,6 +47,8 @@ urlpatterns = [
 
     #to restore the default hyperparameters
     path('restore_default_params/', views.restore_default_hyper_params),
+
+    path('get_system_info/', views.get_system_info_view),
 ]
     
 

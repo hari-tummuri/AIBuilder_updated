@@ -9,3 +9,6 @@ test_api*
 .env
 
 conversations.json
+rag.py
+system_info*
+test*

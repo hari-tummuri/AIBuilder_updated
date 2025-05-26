@@ -22,6 +22,7 @@ from .services.sync_runner import check_internet_connection
 from .services.ollama_service import get_downloaded_models, delete_model
 from .services.vectordb_service import simulate_vdb_upload
 from .services.hyper_params_service import get_hyperparameters, compare_structure
+from .services.system_info_service import get_system_info
 from django.http import StreamingHttpResponse,JsonResponse,HttpResponse,HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.encoding import smart_str
@@ -387,6 +388,15 @@ async def cancel_download(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+@api_view(['GET'])
+def get_system_info_view(request):
+    try:
+        system_info = get_system_info()
+        return Response(system_info, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
 # retrieves hyperparameters from a JSON file
