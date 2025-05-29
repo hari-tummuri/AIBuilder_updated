@@ -12,6 +12,7 @@ from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework import status
 from itassist.services import conversation
+# import itassist.services as services
 from .utils.sync_utils import sync_json_to_mysql
 from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE, USER_DATA_ROOT, DEFAULT_FILE, SELECTED_FILE
 from django.http import FileResponse
@@ -28,7 +29,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.encoding import smart_str
 import asyncio
 import httpx
-
+import subprocess
 # Create your views here.
 
 #For Creating a new conversation
@@ -494,6 +495,186 @@ def upload_document(request):
 
     except Exception as e:
         return Response({"error": f"Failed to save file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+@api_view(['POST'])    
+def stop_ollama_model_view(request):
+    """
+    This function stops an Ollama model by sending a POST request to the Ollama API.
+    It returns a success message if the model is stopped successfully, or an error message if it fails.
+    """
+    
+    model_name = request.data.get('model')
+    ollama_dir = os.path.abspath("./Ollama")
+    executable_path = os.path.join(ollama_dir, 'ollama.exe')
+    try:
+        # result = subprocess.run(["ollama", "stop", model_name], check=True, capture_output=True, text=True)
+        ollama_process = subprocess.Popen(
+                    [executable_path, "stop", model_name],
+                    cwd=ollama_dir,
+                    # stdout=subprocess.PIPE,
+                    # stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, 
+                )
+
+        print(f"✅ Gracefully stopped model: {model_name}")
+        return Response({"message": f"Model '{model_name}' stopped successfully."}, status=status.HTTP_200_OK)
+        print(ollama_process.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to stop model {model_name} gracefully: {e.stderr}")
+        return Response({"error": f"Failed to stop model: {e.stderr}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def stop_ollama_model(model_name):
+    ollama_dir = os.path.abspath("./Ollama")
+    executable_path = os.path.join(ollama_dir, 'ollama.exe')
+    try:
+        # result = subprocess.run(["ollama", "stop", model_name], check=True, capture_output=True, text=True)
+        ollama_process = subprocess.Popen(
+                    [executable_path, "stop", model_name],
+                    cwd=ollama_dir,
+                    # stdout=subprocess.PIPE,
+                    # stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, 
+                )
+
+        print(f"✅ Gracefully stopped model: {model_name}")
+        return True
+        print(ollama_process.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to stop model {model_name} gracefully: {e.stderr}")
+        # return Response({"error": f"Failed to stop model: {e.stderr}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return False
+
+    
+@api_view(['POST'])
+def switch_model_view(request):
+    """
+    This function switches the Ollama model by sending a POST request to the Ollama API.
+    It returns a success message if the model is switched successfully, or an error message if it fails.
+    """
+    # Open and load the JSON file
+    with open(MODELS_FILE, 'r') as file:
+        data = json.load(file)
+
+    current_model = data.get('current_model')
+    new_model_name = request.data.get('new_model_name')
+    if not new_model_name:
+        return {"error": "New Model name is required"}
+    #first we need to stop the current model
+    try:
+        stop_ollama_model(current_model)
+
+    except Exception as e: 
+        return Response({"error": f"Failed to stop current model: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": new_model_name,
+                "prompt": "hi",
+                "stream": False
+            }
+        )
+
+        if response.status_code == 200:
+            data.update({
+                "current_model": new_model_name
+            })
+            with open(MODELS_FILE, 'w') as file:
+                json.dump(data, file, indent=4)
+            return Response({"message": f"✅ Model {new_model_name} is running."})
+        else:
+            return Response(
+                {"error": f"❌ Failed to start model: {response.status_code} - {response.text}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    except requests.exceptions.RequestException as e:
+        return Response(
+            {"error": f"❌ Exception when calling Ollama: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+#to get currently selected model
+@api_view(['GET'])
+def get_current_model_view(request):
+    with open(MODELS_FILE, 'r') as file:
+        data = json.load(file)
+
+    current_model = data.get('current_model')
+    return Response({"current_model": current_model}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])   
+def ollama_chat_view(request):
+    data = request.data
+    message = data.get("message", "")
+    # model_name = data.get("model", "llama3")
+    with open(MODELS_FILE, 'r') as file:
+        data = json.load(file)
+
+    model_name = data.get('current_model')
+    if not message:
+        return Response({"error": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        response = requests.post(
+            'http://localhost:11434/api/chat',
+            json={
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": message}
+                ]
+            }
+        )
+        print(f"Ollama output : {response.json()}")
+        response.raise_for_status()  # Raise an error for bad responses
+        return Response(response.json(), status=status.HTTP_200_OK)
+    except requests.exceptions.ConnectionError:
+        return Response({"error": "Ollama API is not running on http://localhost:11434"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    except requests.exceptions.HTTPError:
+        return Response({"error": "Failed to communicate with Ollama API", "details": response.text}, status=response.status_code)
+    except Exception as e:
+        return Response({"error": "Unexpected error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# @api_view(['POST'])   
+# def ollama_chat_view(request):
+#     """
+#     This function handles the Ollama chat view.
+#     It is currently a placeholder and does not implement any functionality.
+#     """
+#     from langchain_core.prompts import ChatPromptTemplate
+#     from langchain_ollama.llms import OllamaLLM
+#     from langchain_core.output_parsers import StrOutputParser
+#     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
+#     prompt = request.data.get("prompt", None)
+#     model_name = request.data.get("model", None)
+
+#     if not prompt:
+#         return Response({"error": "Prompt is required."}, status=status.HTTP_400_BAD_REQUEST)
+#     if not model_name:
+#         return Response({"error": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+#     prompt_template = ChatPromptTemplate.from_messages(
+#         [
+#             SystemMessage(content="Answer the question based on your knowledge"),
+#             HumanMessage(content= ""),
+#         ]
+#     )
+
+#     question = f""""
+#             <s> [INST] {prompt} [INST]</s>
+#     """
+#     model = OllamaLLM(model=model_name, temperature=0.7, max_tokens=1000)
+
+#     chain = prompt_template | model | StrOutputParser()
+
+#     response = chain.invoke({"question" : question})
+#     # response = chain.invoke()
+
+#     return Response({"message": response}, status=status.HTTP_200_OK)
 
 
 #previous code

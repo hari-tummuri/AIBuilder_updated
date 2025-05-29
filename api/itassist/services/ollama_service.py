@@ -1,4 +1,8 @@
 import requests
+from core.settings import CONV_JSON_FILE, MODELS_FILE
+import json
+from .hyper_params_service import get_hyperparameters
+# from .conversation import get_conversation_by_id
 
 def bytes_to_gib(size_bytes):
     if size_bytes is None:
@@ -47,3 +51,70 @@ def delete_model(model_name: str, ollama_url="http://localhost:11434/api/delete"
     except ValueError:
         # No JSON returned, return status code or message
         return {"message": "Model deleted successfully or no content returned.", "status_code": response.status_code}
+    
+
+def modelResponse(question, conv_id):
+    # return "Response from LLM"
+    from .conversation import get_conversation_by_id
+    hyper_params = get_hyperparameters()
+    system_prompt = hyper_params['parameters']['system_prompt']
+
+    with open(MODELS_FILE, "r") as file:
+        data = json.load(file)
+
+    current_model = data.get('current_model')
+
+    conv_details, staus = get_conversation_by_id(conv_id)  # Ensure conversation exists
+    message_context = get_updated_messages(conv_details)
+    
+    # Convert message_context to OpenAI-like chat format
+    chat_messages = [{"role": "system", "content": system_prompt+"dont mention that context is provided. just follow the instruction"}]
+
+    for msg in message_context:
+        chat_messages.append({
+            "role": msg["from_field"],  # already 'user' or 'assistant'
+            "content": msg["message"]
+        })
+
+     # Append the current user question as the last input
+    chat_messages.append({"role": "user", "content": question})
+
+    response = requests.post(
+            'http://localhost:11434/api/chat',
+            json={
+                "model": current_model,
+                "messages":chat_messages,
+                "stream": False
+            }
+        )
+    data = response.json()
+    return data['message']['content']
+
+def update_from_field(messages: list) -> list:
+    """
+    Converts 'from_field' values to lowercase:
+    - 'System' becomes 'assistant'
+    - 'User' becomes 'user'
+    
+    Args:
+        messages (list): A list of message dictionaries.
+    
+    Returns:
+        list: Updated list with modified 'from_field' values.
+    """
+    for msg in messages:
+        if msg.get('from_field') == 'System':
+            msg['from_field'] = 'assistant'
+        elif msg.get('from_field') == 'User':
+            msg['from_field'] = 'user'
+    return messages
+
+def get_updated_messages(data: dict) -> list:
+    """
+    Extracts and updates the 'messages' list from the input data.
+    Returns an empty list if 'messages' is missing or empty.
+    """
+    messages = data.get('messages', [])
+    if isinstance(messages, list) and messages:
+        return update_from_field(messages)
+    return []

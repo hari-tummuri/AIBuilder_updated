@@ -1,5 +1,18 @@
 {
-    "models": ["llama3.1", "phi4", "qwen3", "gemma3", "mistral"],
-    "embedding_models" : ["nomic-embed-text", "mxbai-embed-large", "all-minilm"],
-    "reranker_models" : ["cross-encoder/ms-marco-MiniLM-L6-v2"]
+    "current_model": "Llama3",
+    "models": [
+        "llama3.1",
+        "phi4",
+        "qwen3",
+        "gemma3",
+        "mistral"
+    ],
+    "embedding_models": [
+        "nomic-embed-text",
+        "mxbai-embed-large",
+        "all-minilm"
+    ],
+    "reranker_models": [
+        "cross-encoder/ms-marco-MiniLM-L6-v2"
+    ]
 }

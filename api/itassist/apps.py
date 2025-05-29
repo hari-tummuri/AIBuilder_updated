@@ -8,12 +8,23 @@ import atexit
 import platform
 import re
 import psutil
+# from .views import stop_ollama_model
+import json
+from core.settings import MODELS_FILE
 
 ollama_process = None
 thread_started = False
 
 
 def stop_ollama_by_port(port=11434):
+        from .views import stop_ollama_model
+
+        with open(MODELS_FILE, "r") as file:
+            data = json.load(file)
+
+        current_model = data.get('current_model')
+        stop_ollama_model(current_model)
+        
         if platform.system() == "Windows":
             try:
                 # Run netstat and find the PID using the port
@@ -52,6 +63,7 @@ class ItassistConfig(AppConfig):
         # print("✅ AppConfig.ready() called")
         # start_background_sync()
         # thread_started = True
+        
 
         global thread_started, ollama_process
 

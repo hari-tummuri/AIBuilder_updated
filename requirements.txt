@@ -19,3 +19,8 @@ GPUtil
 setuptools
 py-cpuinfo
 nvidia-ml-py3
+
+#testing 2
+langchain
+langchain-community
+langchain-ollama

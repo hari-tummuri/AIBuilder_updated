@@ -4,7 +4,8 @@ import json
 from datetime import datetime
 from rest_framework import status
 from core.settings import CONV_JSON_FILE
-from .answer import modelResponse
+# from .answer import modelResponse
+from .ollama_service import modelResponse
 
 
 # JSON_FILE = r"./userdata/conversations.json"
@@ -131,7 +132,7 @@ def add_user_message(conv_id, message_text):
                 json.dump(conversations, file, indent=4)
 
             # Add static system message using your existing helper
-            add_system_message(conv_id, modelResponse(message_text))
+            add_system_message(conv_id, modelResponse(message_text, conv_id))
 
             # Reload conversation to include both messages before returning
             with open(CONV_JSON_FILE, "r") as file:

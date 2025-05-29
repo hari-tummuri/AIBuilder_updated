@@ -48,7 +48,20 @@ urlpatterns = [
     #to restore the default hyperparameters
     path('restore_default_params/', views.restore_default_hyper_params),
 
+    #to get the system info
     path('get_system_info/', views.get_system_info_view),
+
+    #to swith the model
+    path('switch_model/', views.switch_model_view),
+
+    #to get the currently selected model
+    path('current_model/', views.get_current_model_view),
+    
+    path('stop_model/', views.stop_ollama_model_view),
+
+    path('ollama_chat/', views.ollama_chat_view),
+
+    
 ]
     
 
