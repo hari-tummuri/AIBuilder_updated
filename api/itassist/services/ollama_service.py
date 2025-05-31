@@ -2,6 +2,7 @@ import requests
 from core.settings import CONV_JSON_FILE, MODELS_FILE
 import json
 from .hyper_params_service import get_hyperparameters
+from .vectordb_service import query_vector_db
 # from .conversation import get_conversation_by_id
 
 def bytes_to_gib(size_bytes):
@@ -52,8 +53,25 @@ def delete_model(model_name: str, ollama_url="http://localhost:11434/api/delete"
         # No JSON returned, return status code or message
         return {"message": "Model deleted successfully or no content returned.", "status_code": response.status_code}
     
+def rephrase_query(query, chat_messages, current_model):
+    new_sys_prompt = "rephrase the question accoring to the given context...and give only the rephrased question..no extra information needed.."
+    chat_messages[0] = {"role":"system", "content": new_sys_prompt}
+    chat_messages.append({"role":"user", "content": query})
+    print("rephrasing question...")
+    response = requests.post(
+            'http://localhost:11434/api/chat',
+            json={
+                "model": current_model,
+                "messages":chat_messages,
+                "stream": False
+            }
+        )
+    data = response.json()
+    return data['message']['content']
 
-def modelResponse(question, conv_id):
+    
+
+def modelResponse(question, conv_id, collection_name):
     # return "Response from LLM"
     from .conversation import get_conversation_by_id
     hyper_params = get_hyperparameters()
@@ -68,16 +86,22 @@ def modelResponse(question, conv_id):
     message_context = get_updated_messages(conv_details)
     
     # Convert message_context to OpenAI-like chat format
-    chat_messages = [{"role": "system", "content": system_prompt+"dont mention that context is provided. just follow the instruction"}]
+    chat_messages = [{"role": "system", "content": system_prompt+"while generating response dont mention that context is provided. just follow the instruction and give the response in 30 words."}]
 
     for msg in message_context:
         chat_messages.append({
             "role": msg["from_field"],  # already 'user' or 'assistant'
             "content": msg["message"]
         })
+    #rephrasing user query based on context
+    # rephrased_query = rephrase_query(question, chat_messages, current_model)
 
-     # Append the current user question as the last input
-    chat_messages.append({"role": "user", "content": question})
+    db_context, references = query_vector_db(question, collection_name)
+
+    # Append the current user question as the last input
+    chat_messages.append({"role": "user", "content": f"Context : {db_context}..Query: {question}"})
+
+    print("Generatig the response...")
 
     response = requests.post(
             'http://localhost:11434/api/chat',
@@ -88,7 +112,8 @@ def modelResponse(question, conv_id):
             }
         )
     data = response.json()
-    return data['message']['content']
+    return {'message' : data['message']['content'], 'references': references}
+    # return data['message']['content']
 
 def update_from_field(messages: list) -> list:
     """

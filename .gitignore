@@ -12,3 +12,4 @@ conversations.json
 rag.py
 system_info*
 test*
+chroma_db

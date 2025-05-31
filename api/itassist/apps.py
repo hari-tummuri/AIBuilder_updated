@@ -64,7 +64,7 @@ class ItassistConfig(AppConfig):
         # start_background_sync()
         # thread_started = True
         
-
+        from .services.vectordb_service import load_documents
         global thread_started, ollama_process
 
         if thread_started:
@@ -79,6 +79,10 @@ class ItassistConfig(AppConfig):
             start_background_sync()
             thread_started = True
 
+            print("Loading documents into ChromaDB...")
+            load_documents()
+            print("Finished loading documents.")
+            
             # 🔁 Start Ollama in a specific directory
             ollama_dir = os.path.abspath("./Ollama") 
             # 🔁 Start Ollama using relative path
@@ -96,6 +100,8 @@ class ItassistConfig(AppConfig):
                 print("✅ Ollama started.")
             except Exception as e:
                 print(f"❌ Failed to start Ollama: {e}")
+
+            
 
             atexit.register(lambda: stop_ollama_by_port(port=11434))
 

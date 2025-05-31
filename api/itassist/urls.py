@@ -39,6 +39,11 @@ urlpatterns = [
     #to upload a file to Vector DB and store it in others folder
     path("upload_document/", views.upload_document),
 
+    # path("query_user_doc/<str:conv_id>/", views.add_user_message_to_conversation),
+
+    #to delete files in others folder
+    path('delete_document/', views.delete_document_view),
+
     #to retrive the hyperparameters
     path('hyperparameters/', views.get_hyperparams_view),
 

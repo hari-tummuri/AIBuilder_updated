@@ -21,7 +21,7 @@ from .serializers import SharedBlobSerializer
 from .models import SharedBlob
 from .services.sync_runner import check_internet_connection
 from .services.ollama_service import get_downloaded_models, delete_model
-from .services.vectordb_service import simulate_vdb_upload
+from .services.vectordb_service import simulate_vdb_upload,upload_new_document, delete_document
 from .services.hyper_params_service import get_hyperparameters, compare_structure
 from .services.system_info_service import get_system_info
 from django.http import StreamingHttpResponse,JsonResponse,HttpResponse,HttpRequest
@@ -103,7 +103,8 @@ def update_conversation(request, conv_id):
 @api_view(["POST"])
 def add_user_message_to_conversation(request, conv_id):
     message_text = request.data.get("message")
-    result, status = conversation.add_user_message(conv_id, message_text)
+    collection_name = request.data.get("collection_name")
+    result, status = conversation.add_user_message(conv_id, message_text, collection_name)
     return Response(result, status=status)
 
 
@@ -476,7 +477,8 @@ def upload_document(request):
     # === Simulate VDB upload ===
     try:
         # TODO: Replace this block with real VDB integration
-        simulate_vdb_upload(file)
+        # simulate_vdb_upload(file)
+        upload_new_document(file)
     except Exception as e:
         return Response({"error": f"Failed to upload to VDB: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -495,6 +497,43 @@ def upload_document(request):
 
     except Exception as e:
         return Response({"error": f"Failed to save file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+def delete_file_by_name(file_name):
+    # Fetch the folder path from Django settings
+    folder_path = os.path.join(DOCUMENT_ROOT, 'others')
+
+    if not folder_path:
+        return "Folder path not configured in settings."
+
+    # Check if the folder exists
+    if not os.path.isdir(folder_path):
+        return "Folder does not exist."
+
+    # Construct full file path
+    file_path = os.path.join(folder_path, file_name)
+
+    # Check if the file exists in the folder
+    if os.path.isfile(file_path):
+        try:
+            os.remove(file_path)
+            return f"File '{file_name}' deleted successfully."
+        except Exception as e:
+            return f"Error deleting file: {e}"
+    else:
+        return f"No such file: '{file_name}'"
+
+@api_view(['DELETE']) 
+def delete_document_view(request):
+    file_name = request.data.get('filename')
+
+    if not file_name:
+        return Response({'error' : 'file name required'})
+    delete_document(filename=file_name)
+
+    delete_file_by_name(file_name=file_name)
+
+    return Response({'message':f'Successfully deleted the file {file_name}'}, status=status.HTTP_204_NO_CONTENT)
+
     
 
 @api_view(['POST'])    
@@ -583,16 +622,16 @@ def switch_model_view(request):
             })
             with open(MODELS_FILE, 'w') as file:
                 json.dump(data, file, indent=4)
-            return Response({"message": f"✅ Model {new_model_name} is running."})
+            return Response({"switched_model" : new_model_name,"message": f"Model {new_model_name} is running."}, status=status.HTTP_200_OK)
         else:
             return Response(
-                {"error": f"❌ Failed to start model: {response.status_code} - {response.text}"},
+                {"error": f"Failed to start model: {response.status_code} - {response.text}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
     except requests.exceptions.RequestException as e:
         return Response(
-            {"error": f"❌ Exception when calling Ollama: {str(e)}"},
+            {"error": f"Exception when calling Ollama: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     

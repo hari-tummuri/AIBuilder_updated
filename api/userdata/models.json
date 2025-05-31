@@ -1,5 +1,6 @@
 {
     "current_model": "Llama3",
+    "current_reranker_Model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
     "models": [
         "llama3.1",
         "phi4",

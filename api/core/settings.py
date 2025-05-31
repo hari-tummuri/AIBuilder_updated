@@ -154,6 +154,7 @@ DEFAULT_FILE = r"./userdata/default_hyper_params.json"
 SELECTED_FILE = r"./userdata/selected_hyper_params.json"
 MODELS_FILE = r"./userdata/models.json"
 DOCUMENT_ROOT = r"./userdata/Documents"
+CHROMA_DB_PATH = r"./chroma_db"
 AZURE_CONNECTION_STRING = os.getenv('AZURE_CONNECTION_STRING')
 # print(AZURE_CONNECTION_STRING)
 AZURE_CONTAINER_NAME = "aibuilder"

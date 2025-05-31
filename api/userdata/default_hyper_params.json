@@ -12,7 +12,7 @@
             "reranker_threshold": 0.5
         }
     },
-    "system_prompt" : "Please provide a detailed answer to the user's question based on the provided context. if the context is not suuficient then answer from your own knowledge. Use a friendly and informative tone. If the question is not related to the context, please inform the user that their question is outside the scope of the provided information."  
+    "system_prompt" : "Please provide a detailed answer to the user's question based on the provided context and previous messages. if the context is not suuficient then answer from your own knowledge. Use a friendly and informative tone."  
 }
 
 

@@ -6,7 +6,9 @@ uvicorn
 uvicorn-worker
 azure-storage-blob
 python-dotenv
-
+langchain
+langchain-community
+langchain-ollama
 
 
 #testing
@@ -21,6 +23,7 @@ py-cpuinfo
 nvidia-ml-py3
 
 #testing 2
-langchain
-langchain-community
-langchain-ollama
+chromadb
+PyPDF2 
+python-docx
+sentence_transformers

@@ -99,7 +99,7 @@ def update_conversation_data(conv_id, data):
 
 # This function adds a new user message to the specified conversation.
 # It generates a unique message ID based on the existing messages in the conversation.
-def add_user_message(conv_id, message_text):
+def add_user_message(conv_id, message_text, collection_name):
     try:
         with open(CONV_JSON_FILE, "r") as file:
             conversations = json.load(file)
@@ -132,7 +132,10 @@ def add_user_message(conv_id, message_text):
                 json.dump(conversations, file, indent=4)
 
             # Add static system message using your existing helper
-            add_system_message(conv_id, modelResponse(message_text, conv_id))
+            response = modelResponse(message_text, conv_id, collection_name)
+            ai_message = response['message']
+            references = response['references']
+            add_system_message(conv_id, ai_message, references)
 
             # Reload conversation to include both messages before returning
             with open(CONV_JSON_FILE, "r") as file:
@@ -147,7 +150,7 @@ def add_user_message(conv_id, message_text):
 
 # This function adds a system message to the specified conversation.
 # It generates a unique message ID based on the existing messages in the conversation.
-def add_system_message(conv_id, message_text):
+def add_system_message(conv_id, message_text, references):
     try:
         with open(CONV_JSON_FILE, "r") as file:
             conversations = json.load(file)
@@ -163,12 +166,13 @@ def add_system_message(conv_id, message_text):
             existing_ids = [msg.get("id", "") for msg in conv["messages"] if isinstance(msg.get("id", ""), str)]
             numbers = [int(msg_id.split("-")[-1]) for msg_id in existing_ids if msg_id.startswith(conv_id + "-")]
             next_num = max(numbers, default=0) + 1
-
+            print(f"references ----- {references}")
             new_message = {
                 "id": f"{conv_id}-{next_num}",
                 "from_field": "System",
                 "message": message_text,
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+                "references" : references
             }
 
             conv["messages"].append(new_message)
