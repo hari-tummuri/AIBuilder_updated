@@ -102,15 +102,17 @@ def modelResponse(question, conv_id, collection_name):
     chat_messages.append({"role": "user", "content": f"Context : {db_context}..Query: {question}"})
 
     print("Generatig the response...")
-
-    response = requests.post(
-            'http://localhost:11434/api/chat',
-            json={
-                "model": current_model,
-                "messages":chat_messages,
-                "stream": False
-            }
-        )
+    try:
+        response = requests.post(
+                'http://localhost:11434/api/chat',
+                json={
+                    "model": current_model,
+                    "messages":chat_messages,
+                    "stream": False
+                }
+            )
+    except Exception:
+        raise Exception("Some uknown error from ollama...might be model not exist in local machine")
     data = response.json()
     return {'message' : data['message']['content'], 'references': references}
     # return data['message']['content']

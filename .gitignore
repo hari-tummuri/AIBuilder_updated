@@ -13,3 +13,5 @@ rag.py
 system_info*
 test*
 chroma_db
+selected_hyper_params*
+others
