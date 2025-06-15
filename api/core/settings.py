@@ -12,7 +12,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
+from itassist.utils.file_utils import get_data_path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -148,14 +150,35 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CONV_JSON_FILE = r"./userdata/conversations.json"
-USER_DATA_ROOT = r"./userdata/"
-DEFAULT_FILE = r"./userdata/default_hyper_params.json"
-SELECTED_FILE = r"./userdata/selected_hyper_params.json"
-MODELS_FILE = r"./userdata/models.json"
-DOCUMENT_ROOT = r"./userdata/Documents"
-CHROMA_DB_PATH = r"./chroma_db"
-AZURE_CONNECTION_STRING = os.getenv('AZURE_CONNECTION_STRING')
-# print(AZURE_CONNECTION_STRING)
+
+# Main userdata folder (copied once on .exe, normal in dev)
+USER_DATA_ROOT = get_data_path("userdata")
+
+# All other paths derived from that
+CONV_JSON_FILE = os.path.join(USER_DATA_ROOT, "conversations.json")
+DEFAULT_FILE = os.path.join(USER_DATA_ROOT, "default_hyper_params.json")
+SELECTED_FILE = os.path.join(USER_DATA_ROOT, "selected_hyper_params.json")
+MODELS_FILE = os.path.join(USER_DATA_ROOT, "models.json")
+DOCUMENT_ROOT = os.path.join(USER_DATA_ROOT, "Documents")
+DOWNLOAD_FOLDER = os.path.join(DOCUMENT_ROOT, "others")
+
+# chroma_db is a subfolder of userdata
+CHROMA_DB_PATH = os.path.join(USER_DATA_ROOT, "chroma_db")
+
+# Azure
+AZURE_CONNECTION_STRING = os.getenv("AZURE_CONNECTION_STRING")
 AZURE_CONTAINER_NAME = "aibuilder"
-DOWNLOAD_FOLDER = r"./userdata/Documents/others"
+
+
+# CONV_JSON_FILE = r"./userdata/conversations.json"
+# USER_DATA_ROOT = r"./userdata/"
+# DEFAULT_FILE = r"./userdata/default_hyper_params.json"
+# SELECTED_FILE = r"./userdata/selected_hyper_params.json"
+# MODELS_FILE = r"./userdata/models.json"
+# DOCUMENT_ROOT = r"./userdata/Documents"
+# CHROMA_DB_PATH = r"./userdata/chroma_db"
+# DOWNLOAD_FOLDER = r"./userdata/Documents/others"
+
+# AZURE_CONNECTION_STRING = os.getenv('AZURE_CONNECTION_STRING')
+# # print(AZURE_CONNECTION_STRING)
+# AZURE_CONTAINER_NAME = "aibuilder"

@@ -6,6 +6,8 @@ urlpatterns = [
     path('new_conv/', views.create_conversation),
     #to delete a conversation and its messages
     path('delete_conv/<str:conv_id>/', views.delete_conversation),
+    #to delete conversation history
+    path('delete_history/', views.delete_conv_hist_view),
     #to get all conversations with their messages
     path('get_all_conv/', views.get_all_conversations),
     #to upadate a conversation
@@ -62,10 +64,11 @@ urlpatterns = [
     #to get the currently selected model
     path('current_model/', views.get_current_model_view),
     
+
+    #testing purpose
     path('stop_model/', views.stop_ollama_model_view),
 
     path('ollama_chat/', views.ollama_chat_view),
-
     
 ]
     

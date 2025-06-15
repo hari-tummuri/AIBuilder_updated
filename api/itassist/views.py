@@ -55,6 +55,15 @@ def create_conversation(request):
 
     return Response(new_convo, status=status.HTTP_201_CREATED)
 
+# This function deletes the entire conversation history
+@api_view(['DELETE'])
+def delete_conv_hist_view(requset):
+    res = conversation.delete_conv_history()
+    if res:
+        return Response({"message": "Conversation history deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+    else:
+        return Response({"error": "Failed to delete conversation history."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 # This function deletes a conversation based on the provided conversation ID.
 # It checks if the conversation exists in the JSON file and removes it if found.
 @api_view(['DELETE'])
@@ -127,13 +136,27 @@ def sync_data_sql_server(request):
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# @api_view(["GET"])
+# def list_files(request):
+#     file_list = []
+#     for root, dirs, files in os.walk(DOCUMENT_ROOT):
+#         for file in files:
+#             rel_path = os.path.relpath(os.path.join(root, file), start=DOCUMENT_ROOT)
+#             file_list.append(os.path.join(DOCUMENT_ROOT, rel_path).replace("\\", "/"))  # Normalize Windows paths
+#     return Response({"files": file_list})
+
+
+# This function lists all files in the DOCUMENT_ROOT directory and its subdirectories.
 @api_view(["GET"])
 def list_files(request):
     file_list = []
     for root, dirs, files in os.walk(DOCUMENT_ROOT):
         for file in files:
-            rel_path = os.path.relpath(os.path.join(root, file), start=DOCUMENT_ROOT)
-            file_list.append(os.path.join(DOCUMENT_ROOT, rel_path).replace("\\", "/"))  # Normalize Windows paths
+            abs_path = os.path.join(root, file)
+            rel_path = os.path.relpath(abs_path, start=DOCUMENT_ROOT)
+            rel_path = rel_path.replace("\\", "/")  # Normalize Windows-style paths
+            # file_list.append(f"userdata/{rel_path}")
+            file_list.append(rel_path)  # Store relative path directly
     return Response({"files": file_list})
 
 
@@ -214,7 +237,11 @@ def list_noti_by_email(request, email):
     else:
         return Response({'error': 'No internet connection to display notifications'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
-
+# This function downloads a file from Azure Blob Storage to the local machine.
+# It requires the blob URL and the desired filename as input.
+# It checks if the internet connection is available before proceeding with the download.
+# If the download is successful, it saves the file to the specified local path.
+# It also uploads the file to a vector database (VDB) and deletes the blob from Azure Blob Storage.
 @api_view(['POST'])
 def download_blob_to_local(request):
     print("Downloading blob to local...")
@@ -238,6 +265,10 @@ def download_blob_to_local(request):
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         print(f"File downloaded to {file_path}")
+        print(f"converting into embeddings")
+        with open(file_path, 'rb') as file:
+            # Simulate VDB upload
+            upload_new_document(file)
         print("deleting file in Blob storage")
 
         #delete the blob from Azure Blob Storage
@@ -256,6 +287,9 @@ def download_blob_to_local(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
+# This function lists all downloaded Ollama models by fetching data from the Ollama API.
+# It returns the list of models in the response.
+# It handles connection errors and other exceptions gracefully.
 @api_view(['GET'])
 def list_downloaded_ollama_models(request):
     try:
@@ -279,6 +313,9 @@ def list_downloaded_ollama_models(request):
         )
     
 
+# This function deletes a specific Ollama model by sending a DELETE request to the Ollama API.
+# It requires the model name to be provided in the request body.
+# It handles errors such as missing model name, connection errors, and HTTP errors.
 @api_view(['POST'])  # Use POST since some clients have issues with DELETE + body
 def delete_ollama_model(request):
     model_name = request.data.get('model')
@@ -303,7 +340,9 @@ def delete_ollama_model(request):
 cancel_flags = {}
 cancel_lock = asyncio.Lock()
 
-
+# This function downloads an Ollama model by sending a request to the Ollama API.
+# It streams the download progress and allows cancellation of the download.
+# It requires the model name to be provided in the request body.
 @csrf_exempt
 async def download_ollama_model(request: HttpRequest):
     # Parse JSON body
@@ -371,6 +410,9 @@ async def error_stream(message):
     yield json.dumps({"error": message}) + "\n"
 
 
+# This function cancels an ongoing download by setting a cancel flag for the specified download ID.
+# It requires the download ID to be provided in the request body.
+# It checks if the download ID exists and is not already completed.
 @csrf_exempt
 async def cancel_download(request):
     try:
@@ -391,7 +433,7 @@ async def cancel_download(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
+# This function retrieves system information
 @api_view(['GET'])
 def get_system_info_view(request):
     try:
@@ -423,30 +465,39 @@ def get_hyperparams_view(request):
 # If the structure is invalid, it returns a 400 error.
 @api_view(['POST'])
 def save_selected_hyper_params(request):
-    # DEFAULT_FILE = os.path.join(USER_DATA_ROOT, 'default_hyper_params.json')
     try:
         input_data = request.data
     except Exception:
         return JsonResponse({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Load template structure
+    # Load the default template
     try:
         with open(DEFAULT_FILE, 'r') as f:
             template = json.load(f)
+    except FileNotFoundError:
+        return JsonResponse({"error": f"Template file not found at: {DEFAULT_FILE}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"error": f"Invalid JSON in template file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return JsonResponse({"error": f"Failed to load template file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # Validate structure
     if not compare_structure(template, input_data):
-        return JsonResponse({"error": "Input JSON structure does not match the default template exactly."},
-                            status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse(
+            {"error": "Input JSON structure does not match the default template exactly."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     # Save to selected_hyper_params.json
     try:
+        os.makedirs(os.path.dirname(SELECTED_FILE), exist_ok=True)  # 👈 Ensure directory exists
         with open(SELECTED_FILE, 'w') as f:
             json.dump(input_data, f, indent=4)
     except Exception as e:
-        return JsonResponse({"error": f"Failed to save selected hyperparameters: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return JsonResponse(
+            {"error": f"Failed to save selected hyperparameters: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
     return JsonResponse({"message": "Selected hyperparameters saved successfully."}, status=status.HTTP_200_OK)
 
@@ -455,14 +506,23 @@ def save_selected_hyper_params(request):
 # If the file is deleted successfully, it returns a success message.
 @api_view(['DELETE'])
 def restore_default_hyper_params(request):
-    if os.path.exists(SELECTED_FILE):
-        try:
+    try:
+        if os.path.exists(SELECTED_FILE):
             os.remove(SELECTED_FILE)
-            return JsonResponse({"message": "Restored to default hyperparameters."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return JsonResponse({"error": f"Failed to delete file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    else:
-        return JsonResponse({"message": "No customized hyperparameters found, already using defaults."}, status=status.HTTP_200_OK)
+            return JsonResponse(
+                {"message": "Restored to default hyperparameters."},
+                status=status.HTTP_200_OK
+            )
+        else:
+            return JsonResponse(
+                {"message": "No customized hyperparameters found, already using defaults."},
+                status=status.HTTP_200_OK
+            )
+    except Exception as e:
+        return JsonResponse(
+            {"error": f"Failed to delete file: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 # Simulate VDB upload
 # This function simulates the upload of a file to a VDB (vector Database).
@@ -497,11 +557,14 @@ def upload_document(request):
 
     except Exception as e:
         return Response({"error": f"Failed to save file: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+
+# This function deletes a file by its name from the "others" folder.
+# It checks if the folder exists and if the file is present before attempting to delete it.
+# If the file is deleted successfully, it returns a success message.
 def delete_file_by_name(file_name):
     # Fetch the folder path from Django settings
-    folder_path = os.path.join(DOCUMENT_ROOT, 'others')
-
+    # folder_path = os.path.join(DOCUMENT_ROOT, 'others')
+    folder_path = DOWNLOAD_FOLDER
     if not folder_path:
         return "Folder path not configured in settings."
 
@@ -522,6 +585,7 @@ def delete_file_by_name(file_name):
     else:
         return f"No such file: '{file_name}'"
 
+# This function deletes a document by its filename.
 @api_view(['DELETE']) 
 def delete_document_view(request):
     file_name = request.data.get('filename')
@@ -563,6 +627,10 @@ def stop_ollama_model_view(request):
         print(f"❌ Failed to stop model {model_name} gracefully: {e.stderr}")
         return Response({"error": f"Failed to stop model: {e.stderr}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# This function stops an Ollama model by sending a stop command to the Ollama executable.
+# It requires the model name to be provided as an argument.
+# It uses the subprocess module to run the command and handles any errors that may occur.
+# If the command is successful, it returns a success message.
 def stop_ollama_model(model_name):
     ollama_dir = os.path.abspath("./Ollama")
     executable_path = os.path.join(ollama_dir, 'ollama.exe')
@@ -584,7 +652,10 @@ def stop_ollama_model(model_name):
         # return Response({"error": f"Failed to stop model: {e.stderr}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return False
 
-    
+# This function switches the currently running Ollama model by stopping the current model and starting a new one.
+# It requires the new model name to be provided in the request body.
+# It updates the models.json file with the new model name if the switch is successful.
+# If the switch fails, it returns an error message.
 @api_view(['POST'])
 def switch_model_view(request):
     """
@@ -598,7 +669,7 @@ def switch_model_view(request):
     current_model = data.get('current_model')
     new_model_name = request.data.get('new_model_name')
     if not new_model_name:
-        return {"error": "New Model name is required"}
+        return Response({"error": "New model name is required"}, status=status.HTTP_400_BAD_REQUEST)
     #first we need to stop the current model
     try:
         stop_ollama_model(current_model)
@@ -617,9 +688,7 @@ def switch_model_view(request):
         )
 
         if response.status_code == 200:
-            data.update({
-                "current_model": new_model_name
-            })
+            data["current_model"] = new_model_name
             with open(MODELS_FILE, 'w') as file:
                 json.dump(data, file, indent=4)
             return Response({"switched_model" : new_model_name,"message": f"Model {new_model_name} is running."}, status=status.HTTP_200_OK)
@@ -638,11 +707,15 @@ def switch_model_view(request):
 #to get currently selected model
 @api_view(['GET'])
 def get_current_model_view(request):
-    with open(MODELS_FILE, 'r') as file:
-        data = json.load(file)
-
-    current_model = data.get('current_model')
-    return Response({"current_model": current_model}, status=status.HTTP_200_OK)
+    try:
+        with open(MODELS_FILE, 'r') as file:
+            data = json.load(file)
+        current_model = data.get('current_model')
+        return Response({"current_model": current_model}, status=status.HTTP_200_OK)
+    except FileNotFoundError:
+        return Response({"error": "Models file not found."}, status=status.HTTP_404_NOT_FOUND)
+    except json.JSONDecodeError:
+        return Response({"error": "Invalid JSON format in models file."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])   
@@ -650,10 +723,14 @@ def ollama_chat_view(request):
     data = request.data
     message = data.get("message", "")
     # model_name = data.get("model", "llama3")
-    with open(MODELS_FILE, 'r') as file:
-        data = json.load(file)
-
-    model_name = data.get('current_model')
+    try:
+        with open(MODELS_FILE, 'r') as file:
+            model_data = json.load(file)
+        model_name = model_data.get('current_model')
+    except FileNotFoundError:
+        return Response({"error": "Models file not found."}, status=status.HTTP_404_NOT_FOUND)
+    except json.JSONDecodeError:
+        return Response({"error": "Invalid JSON format in models file."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     if not message:
         return Response({"error": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
     try:
@@ -863,3 +940,5 @@ def ollama_chat_view(request):
 #             return Response({'status': 'cancellation requested'})
 #         else:
 #             return Response({'error': 'Invalid or expired download_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+

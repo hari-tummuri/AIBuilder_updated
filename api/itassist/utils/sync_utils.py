@@ -181,71 +181,69 @@ def sync_json_to_mysql():
     except FileNotFoundError:
         print(f"⚠️ File {CONV_JSON_FILE} not found.")
         return
-    
+    except json.JSONDecodeError as e:
+        print(f"⚠️ Failed to decode JSON: {e}")
+        return
+
     existing_conv_ids = set(Conversation.objects.using('azure').values_list("conv_id", flat=True))
 
     for conv in data:
-        conv_id = conv["conv_id"]
+        conv_id = conv.get("conv_id")
+        if not conv_id:
+            print("⚠️ Skipping entry with missing conv_id.")
+            continue
 
         if conv_id not in existing_conv_ids:
             conversation_data = {
-                "conv_id": conv["conv_id"],
-                "Name": conv["Name"],
-                "Date": parse_datetime(conv["Date"])
+                "conv_id": conv.get("conv_id"),
+                "Name": conv.get("Name", ""),
+                "Date": parse_datetime(conv.get("Date")) if conv.get("Date") else None
             }
 
-            try:
-                serializer = ConversationSerializer(data=conversation_data)
-                if serializer.is_valid():
-                    conversation_obj = Conversation(**serializer.validated_data)
-                    conversation_obj.save(using='azure')
-                    print(f"✅ Added conversation: {conv_id}")
+            serializer = ConversationSerializer(data=conversation_data)
+            if serializer.is_valid():
+                conversation_obj = Conversation(**serializer.validated_data)
+                conversation_obj.save(using='azure')
+                print(f"✅ Added conversation: {conv_id}")
 
-                    # Conversation just created, no messages exist yet
-                    conversation_obj = Conversation.objects.using('azure').get(conv_id=conv_id)
-                    existing_msg_ids = set()
-                else:
-                    print(f"⚠️ Invalid conversation: {serializer.errors}")
-                    continue
-            except ValidationError as e:
-                print(f"⚠️ Error while adding conversation: {e}")
+                # Retrieve saved instance
+                conversation_obj = Conversation.objects.using('azure').get(conv_id=conv_id)
+                existing_msg_ids = set()
+            else:
+                print(f"⚠️ Invalid conversation {conv_id}: {serializer.errors}")
                 continue
         else:
             conversation_obj = Conversation.objects.using('azure').get(conv_id=conv_id)
             print(f"ℹ️ Conversation already exists: {conv_id}")
 
-            # Get existing message IDs for this conversation
             existing_msg_ids = set(
                 Message.objects.using('azure')
                 .filter(conversation=conversation_obj)
                 .values_list('message_id', flat=True)
             )
 
-        # Now process messages
         for msg in conv.get("messages", []):
             msg_id = msg.get("id")
+            if not msg_id:
+                print("⚠️ Skipping message without ID.")
+                continue
+
             if msg_id in existing_msg_ids:
                 print(f"🔁 Skipped existing message: {msg_id}")
                 continue
 
-            try:
-                msg_data = {
-                    "message_id": msg["id"],
-                    "from_field": msg["from_field"],
-                    "message": msg["message"],
-                    "time": parse_datetime(msg["time"]),
-                    "conversation": conversation_obj.pk  # Always use the pk of Azure conversation
-                }
+            msg_data = {
+                "message_id": msg.get("id"),
+                "from_field": msg.get("from_field", "System"),
+                "message": msg.get("message", ""),
+                "time": parse_datetime(msg.get("time")) if msg.get("time") else None,
+                "conversation": conversation_obj.pk
+            }
 
-                serializer = MessageSerializer(data=msg_data)
-                if serializer.is_valid():
-                    message_obj = Message(**serializer.validated_data)
-                    message_obj.save(using='azure')
-                    print(f"✅ Added message: {msg_id}")
-                else:
-                    print(f"⚠️ Invalid message: {serializer.errors}")
-
-            except Conversation.DoesNotExist:
-                print(f"❌ Conversation {conv_id} not found in Azure DB for message {msg_id}")
-            except ValidationError as e:
-                print(f"⚠️ Error while adding message: {e}")
+            serializer = MessageSerializer(data=msg_data)
+            if serializer.is_valid():
+                message_obj = Message(**serializer.validated_data)
+                message_obj.save(using='azure')
+                print(f"✅ Added message: {msg_id}")
+            else:
+                print(f"⚠️ Invalid message {msg_id}: {serializer.errors}")
