@@ -256,3 +256,35 @@ def get_conversation_by_id(conv_id):
         return conv, status.HTTP_200_OK
 
     return {"error": "Conversation not found."}, status.HTTP_404_NOT_FOUND
+
+
+
+
+#testing purpose
+def save_user_message_only(conv_id, message_text):
+    from datetime import datetime
+    if not os.path.exists(CONV_JSON_FILE):
+        return
+
+    with open(CONV_JSON_FILE, "r") as file:
+        conversations = json.load(file)
+
+    for conv in conversations:
+        if conv.get("conv_id") == conv_id:
+            existing_ids = [msg.get("id", "") for msg in conv.get("messages", [])]
+            next_num = max([
+                int(mid.split("-")[-1]) for mid in existing_ids if mid.startswith(f"{conv_id}-") and mid.split("-")[-1].isdigit()
+            ], default=0) + 1
+
+            new_id = f"{conv_id}-{next_num}"
+            new_msg = {
+                "id": new_id,
+                "from_field": "User",
+                "message": message_text,
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            }
+            conv.setdefault("messages", []).append(new_msg)
+            break
+
+    with open(CONV_JSON_FILE, "w") as file:
+        json.dump(conversations, file, indent=4)

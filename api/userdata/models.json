@@ -1,5 +1,5 @@
 {
-    "current_model": "llama3.1:latest",
+    "current_model": "llama3.2:latest",
     "current_reranker_Model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
     "models": [
         "llama3.1",

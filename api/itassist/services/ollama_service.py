@@ -100,8 +100,7 @@ def modelResponse(question, conv_id, collection_name):
             "role": msg["from_field"],  # already 'user' or 'assistant'
             "content": msg["message"]
         })
-    #rephrasing user query based on context
-    # rephrased_query = rephrase_query(question, chat_messages, current_model)
+    
 
     db_context, references = query_vector_db(question, collection_name)
 
@@ -123,7 +122,7 @@ def modelResponse(question, conv_id, collection_name):
     except requests.RequestException as e:
         raise Exception(f"Failed to contact Ollama: {str(e)}")
     except Exception:
-        raise Exception("Some uknown error from ollama...might be model not exist in local machine")
+        raise Exception("Some uknown error from ollama...might be model does not exist in local machine")
     data = response.json()
 
     if "message" not in data or "content" not in data["message"]:
@@ -131,6 +130,77 @@ def modelResponse(question, conv_id, collection_name):
     
     return {'message' : data['message']['content'], 'references': references}
     # return data['message']['content']
+
+
+async def modelResponseStream(question, conv_id, collection_name):
+    import httpx
+    from .conversation import get_conversation_by_id, add_system_message
+    hyper_params = get_hyperparameters()
+    system_prompt = hyper_params['parameters']['system_prompt']
+    temparature = hyper_params['parameters']['llm']['temperature']
+    max_tokens = hyper_params['parameters']['llm']['max_tokens']
+
+    if not os.path.exists(MODELS_FILE):
+        yield "[ERROR] Model config not found."
+        return
+    
+    with open(MODELS_FILE, "r") as file:
+        data = json.load(file)
+
+    current_model = data.get('current_model')
+    if not current_model:
+        yield "[ERROR] No model selected."
+        return
+    
+    conv_details, _ = get_conversation_by_id(conv_id)
+    message_context = get_updated_messages(conv_details)
+
+    # Convert message_context to OpenAI-like chat format
+    chat_messages = [{"role": "system", "content": "Answer the small talks like greetings, acknowledgements and wishes from your knowledge "+system_prompt+"while generating response dont mention that context is provided and give more priority to the previous messages.give some more infomation by applying common sense based on the context provided. just follow the instruction and give the response in 30 words."}]
+
+    for msg in message_context:
+        chat_messages.append({
+            "role": msg["from_field"],  # already 'user' or 'assistant'
+            "content": msg["message"]
+        })
+
+    db_context, references = query_vector_db(question, collection_name)
+
+    # Append the current user question as the last input
+    chat_messages.append({
+        "role": "user",
+        "content": f"Context : {db_context}..Query: {question}"
+    })
+    timeout = httpx.Timeout(60.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", "http://localhost:11434/api/chat", json={
+            "model": current_model,
+            "messages": chat_messages,
+            "stream": True,
+            "temperature": temparature,
+            "max_tokens" : max_tokens
+        }) as response:
+            full_response = ""
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    line = line[6:]
+
+                try:
+                    data = json.loads(line)
+                    content = data.get("message", {}).get("content", "")
+                    if content:
+                        full_response += content
+                        # yield content
+                        yield json.dumps({
+                            "from_field": "System",
+                            "message": content,
+                            "references": references
+                        }) + "\n"
+                except:
+                    continue
+    # After stream ends, save full_response to your JSON
+    add_system_message(conv_id, full_response, references)
+
 
 def update_from_field(messages: list) -> list:
     """

@@ -20,9 +20,10 @@ from .services.azure_blob_service import upload_file_to_blob, delete_blob_from_u
 from .serializers import SharedBlobSerializer
 from .models import SharedBlob
 from .services.sync_runner import check_internet_connection
-from .services.ollama_service import get_downloaded_models, delete_model
+from .services.ollama_service import get_downloaded_models, delete_model, modelResponseStream
 from .services.vectordb_service import simulate_vdb_upload,upload_new_document, delete_document
 from .services.hyper_params_service import get_hyperparameters, compare_structure
+from .services.conversation import save_user_message_only
 from .services.system_info_service import get_system_info
 from django.http import StreamingHttpResponse,JsonResponse,HttpResponse,HttpRequest
 from django.views.decorators.csrf import csrf_exempt
@@ -941,4 +942,30 @@ def ollama_chat_view(request):
 #         else:
 #             return Response({'error': 'Invalid or expired download_id'}, status=status.HTTP_400_BAD_REQUEST)
 
+
+@csrf_exempt
+async def stream_user_message_to_conversation(request, conv_id):
+
+    if request.method != 'POST':
+        return JsonResponse({"error": "Only POST allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    message_text = body.get("message")
+    collection_name = body.get("collection_name")
+
+    if not message_text:
+        return Response({"error": "Message is required."}, status=400)
+    
+    save_user_message_only(conv_id, message_text)
+
+    # generator = modelResponseStream(message_text, conv_id, collection_name)
+
+    return StreamingHttpResponse(
+        modelResponseStream(message_text, conv_id, collection_name),
+        content_type='text/plain'
+    )
 

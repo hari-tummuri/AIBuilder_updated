@@ -21,7 +21,7 @@ other_collection = client.get_or_create_collection("other_store")
 
 def get_files():
     pdfs, docxs = [], []
-
+    
     for root, _, files in os.walk(DOCUMENTS_DIR):
         for file in files:
             if file.lower().endswith(".pdf"):
@@ -33,9 +33,17 @@ def get_files():
 
 
 def extract_pdf_text(path):
-    with open(path, "rb") as f:
-        reader = PdfReader(f)
-        return "\n".join([page.extract_text() or "" for page in reader.pages])
+    # with open(path, "rb") as f:
+    #     reader = PdfReader(f)
+    #     return "\n".join([page.extract_text() or "" for page in reader.pages])
+    print('extracting the pdf text')
+    if isinstance(path, str):  # it's a file path
+        reader = PdfReader(path)
+    else:  # assume it's a file-like object
+        path.seek(0)  # just to be safe
+        reader = PdfReader(path)
+    
+    return "\n".join([page.extract_text() or "" for page in reader.pages])
 
 
 def extract_docx_text(path):
@@ -102,7 +110,7 @@ def rerank_with_cross_encoder(query, docs):
   
     return reranked
 
-
+# Query the vector database
 def query_vector_db(query, collection_name= "main_store"):
     hyper_params = get_hyperparameters()
     retriever_top_k = hyper_params['parameters']['rag']['retrieval']['retriever_top_k']

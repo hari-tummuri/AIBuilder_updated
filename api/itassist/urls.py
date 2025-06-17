@@ -13,7 +13,7 @@ urlpatterns = [
     #to upadate a conversation
     path("update_conv/<str:conv_id>/", views.update_conversation),
     #to ask question to the system
-    path("add_message/<str:conv_id>/", views.add_user_message_to_conversation),
+    # path("add_message/<str:conv_id>/", views.add_user_message_to_conversation),
     #to get full details of a conversation
     path("conversation/<str:conv_id>/", views.get_conversation_detail_view),
     #testing purpose
@@ -69,6 +69,11 @@ urlpatterns = [
     path('stop_model/', views.stop_ollama_model_view),
 
     path('ollama_chat/', views.ollama_chat_view),
+
+    path("add_message/<str:conv_id>/", views.stream_user_message_to_conversation),
+
+    # path("test-stream/", views.test_stream_view)
+
     
 ]
     
