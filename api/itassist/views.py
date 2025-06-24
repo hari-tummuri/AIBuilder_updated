@@ -14,7 +14,7 @@ from rest_framework import status
 from itassist.services import conversation
 # import itassist.services as services
 from .utils.sync_utils import sync_json_to_mysql
-from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE, USER_DATA_ROOT, DEFAULT_FILE, SELECTED_FILE
+from core.settings import CONV_JSON_FILE, DOCUMENT_ROOT, AZURE_CONNECTION_STRING, AZURE_CONTAINER_NAME, DOWNLOAD_FOLDER,MODELS_FILE, USER_DATA_ROOT, DEFAULT_FILE, SELECTED_FILE, ENGINE_CONFIG_FILE
 from django.http import FileResponse
 from .services.azure_blob_service import upload_file_to_blob, delete_blob_from_url
 from .serializers import SharedBlobSerializer
@@ -25,12 +25,14 @@ from .services.vectordb_service import simulate_vdb_upload,upload_new_document, 
 from .services.hyper_params_service import get_hyperparameters, compare_structure
 from .services.conversation import save_user_message_only
 from .services.system_info_service import get_system_info
+from .services.openvino_model_listing import list_openvino_downloaded_models
 from django.http import StreamingHttpResponse,JsonResponse,HttpResponse,HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.encoding import smart_str
 import asyncio
 import httpx
 import subprocess
+
 # Create your views here.
 
 #For Creating a new conversation
@@ -754,6 +756,33 @@ def ollama_chat_view(request):
         return Response({"error": "Failed to communicate with Ollama API", "details": response.text}, status=response.status_code)
     except Exception as e:
         return Response({"error": "Unexpected error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+@csrf_exempt
+async def stream_user_message_to_conversation(request, conv_id):
+
+    if request.method != 'POST':
+        return JsonResponse({"error": "Only POST allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    message_text = body.get("message")
+    collection_name = body.get("collection_name")
+
+    if not message_text:
+        return Response({"error": "Message is required."}, status=400)
+    
+    save_user_message_only(conv_id, message_text)
+
+    # generator = modelResponseStream(message_text, conv_id, collection_name)
+
+    return StreamingHttpResponse(
+        modelResponseStream(message_text, conv_id, collection_name),
+        content_type='text/plain'
+    )
 
 # @api_view(['POST'])   
 # def ollama_chat_view(request):
@@ -942,30 +971,117 @@ def ollama_chat_view(request):
 #         else:
 #             return Response({'error': 'Invalid or expired download_id'}, status=status.HTTP_400_BAD_REQUEST)
 
+# from .services.openvino_downloader import download_model_streaming
+import sys
+from asgiref.sync import async_to_sync
+
+from .services.openvino_downloader import (
+    download_hf_model_stream, cancel_flags, cancel_lock, error_stream
+)
+from .services.openvino_model_delete import openvino_delete_model
 
 @csrf_exempt
-async def stream_user_message_to_conversation(request, conv_id):
+async def openvino_download_view(request: HttpRequest):
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST allowed"}, status=405)
 
-    if request.method != 'POST':
-        return JsonResponse({"error": "Only POST allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-    
     try:
-        body = json.loads(request.body.decode('utf-8'))
+        # in async view, request.body is a bytes object
+        body_bytes = request.body
+        data = json.loads(body_bytes.decode("utf-8"))
+        model_id = data.get("model_id")
+        if not model_id:
+            raise ValueError("Missing model_id")
+    except Exception as e:
+        return StreamingHttpResponse(error_stream("Invalid JSON or missing model_id"), status=400)
+
+    download_id = str(uuid.uuid4())
+    async with cancel_lock:
+        cancel_flags[download_id] = False
+
+    async def stream():
+        # stream lines from the async generator
+        async for line in download_hf_model_stream(model_id, download_id):
+            yield line
+
+    response = StreamingHttpResponse(stream(), content_type="application/json")
+    response["X-Download-ID"] = download_id
+    return response
+
+@csrf_exempt
+async def openvino_cancel_download(request: HttpRequest):
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST allowed"}, status=405)
+    try:
+        body_bytes = request.body
+        data = json.loads(body_bytes.decode("utf-8"))
+        download_id = data.get("download_id")
+        if not download_id:
+            raise ValueError("Missing download_id")
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON or missing download_id"}, status=400)
+
+    async with cancel_lock:
+        if download_id in cancel_flags:
+            cancel_flags[download_id] = True
+            return JsonResponse({"status": "cancellation_requested", "download_id": download_id})
+    return JsonResponse({"error": "Invalid download_id"}, status=404)
+
+@api_view(['GET'])
+def list_openvino_models_view(request):
+    print("Listing OpenVINO models...")
+    models = list_openvino_downloaded_models()
+    return Response(models, status=status.HTTP_200_OK)
+
+@api_view(['DELETE'])
+def openvino_delete_model_view(request):
+    model_id = request.data.get("model_id")
+    if not model_id:
+        return Response({"error": "Missing model_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = openvino_delete_model(model_id)
+    if result["status"] == "deleted":
+        return Response(result, status=status.HTTP_200_OK)
+    elif result["status"] == "not_found":
+        return Response(result, status=status.HTTP_404_NOT_FOUND)
+    else:
+        return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def get_engine_config(request):
+    try:
+        with open(ENGINE_CONFIG_FILE, 'r') as f:
+            data = json.load(f)
+        return Response(data, status=status.HTTP_200_OK)
+    except FileNotFoundError:
+        return Response({"error": "Config file not found."}, status=status.HTTP_404_NOT_FOUND)
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return Response({"error": "Invalid JSON format."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    message_text = body.get("message")
-    collection_name = body.get("collection_name")
+@api_view(['POST'])
+def update_current_engine(request):
+    new_engine = request.data.get('new_engine')
 
-    if not message_text:
-        return Response({"error": "Message is required."}, status=400)
-    
-    save_user_message_only(conv_id, message_text)
+    if not new_engine:
+        return JsonResponse({"error": "Missing 'new_engine' in request body."}, status=400)
 
-    # generator = modelResponseStream(message_text, conv_id, collection_name)
+    try:
+        with open(ENGINE_CONFIG_FILE, 'r') as f:
+            config_data = json.load(f)
 
-    return StreamingHttpResponse(
-        modelResponseStream(message_text, conv_id, collection_name),
-        content_type='text/plain'
-    )
+        if new_engine not in config_data.get("engines_available", []):
+            return JsonResponse({
+                "error": f"'{new_engine}' is not a valid engine. Available: {config_data.get('engines_available', [])}"
+            }, status=400)
 
+        config_data["current_engine"] = new_engine
+
+        with open(ENGINE_CONFIG_FILE, 'w') as f:
+            json.dump(config_data, f, indent=4)
+
+        return JsonResponse({"message": f"'current_engine' updated to '{new_engine}'"}, status=200)
+
+    except FileNotFoundError:
+        return JsonResponse({"error": "Config file not found."}, status=404)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON format."}, status=500)

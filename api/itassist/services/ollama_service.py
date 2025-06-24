@@ -156,7 +156,7 @@ async def modelResponseStream(question, conv_id, collection_name):
     message_context = get_updated_messages(conv_details)
 
     # Convert message_context to OpenAI-like chat format
-    chat_messages = [{"role": "system", "content": "Answer the small talks like greetings, acknowledgements and wishes from your knowledge "+system_prompt+"while generating response dont mention that context is provided and give more priority to the previous messages.give some more infomation by applying common sense based on the context provided. just follow the instruction and give the response in 30 words."}]
+    chat_messages = [{"role": "system", "content": "Answer the small talks like greetings, acknowledgements and wishes from your knowledge "+system_prompt+"while generating response dont mention that context is provided and give more priority to the previous messages.give some more infomation by applying common sense based on the context provided."}]
 
     for msg in message_context:
         chat_messages.append({

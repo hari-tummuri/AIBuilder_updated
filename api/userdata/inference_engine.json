@@ -1,0 +1,7 @@
+{
+    "current_engine": "ollama",
+    "engines_available": [
+        "ollama",
+        "openvino"
+    ]
+}

@@ -161,6 +161,7 @@ SELECTED_FILE = os.path.join(USER_DATA_ROOT, "selected_hyper_params.json")
 MODELS_FILE = os.path.join(USER_DATA_ROOT, "models.json")
 DOCUMENT_ROOT = os.path.join(USER_DATA_ROOT, "Documents")
 DOWNLOAD_FOLDER = os.path.join(DOCUMENT_ROOT, "others")
+ENGINE_CONFIG_FILE = os.path.join(USER_DATA_ROOT, "inference_engine.json")
 
 # chroma_db is a subfolder of userdata
 CHROMA_DB_PATH = os.path.join(USER_DATA_ROOT, "chroma_db")

@@ -72,6 +72,14 @@ urlpatterns = [
 
     path("add_message/<str:conv_id>/", views.stream_user_message_to_conversation),
 
+    path("list_engines/", views.get_engine_config),
+    path("change-engine/", views.update_current_engine),
+    #testing purpose
+    path("openvino-download/", views.openvino_download_view),
+    path("openvino-cancel-download/", views.openvino_cancel_download),
+    path("list-openvino-models/", views.list_openvino_models_view),
+    path("delete-openvino-model/", views.openvino_delete_model_view),
+
     # path("test-stream/", views.test_stream_view)
 
     
